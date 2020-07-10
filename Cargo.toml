@@ -1,0 +1,19 @@
+[package]
+name = "simple-ii"
+version = "0.1.0"
+authors = ["Ray Xu <megrxu@gmail.com>"]
+edition = "2018"
+
+[lib]
+name = "simple_ii_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "simple-ii"
+path = "src/main.rs"
+
+[dependencies]
+lazy_static = "*"
+itertools = "*"
+functional = "0.0.5"
+rustyline = "*"
