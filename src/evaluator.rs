@@ -40,6 +40,7 @@ fn rebuild_exprs(exprs: &[Expr], args: usize, env: &Env) -> Option<(Vec<Expr>, u
     let mut iter = exprs.iter();
     let mut idx = 0;
     let mut exprs: Vec<Expr> = vec![];
+    let mut flag = true;
     while idx < args {
         let e = iter.next();
         match e {
@@ -51,26 +52,27 @@ fn rebuild_exprs(exprs: &[Expr], args: usize, env: &Env) -> Option<(Vec<Expr>, u
                         let mut i = 0;
                         exprs.push(Expr::Factor(Factor::Num(*v)));
                         idx += 1;
-                        while i < len {
-                            let (mut es, n, _) = rebuild_exprs(&fc.exprs[i..], args - idx, env)?;
-                            if n == 0 {
-                                break
-                            }
+                        while i < len && args - idx != 0 {
+                            let (mut es, n, b) = rebuild_exprs(&fc.exprs[i..], args - idx, env)?;
                             idx += es.len();
                             exprs.append(&mut es);
                             i += n;
+                            flag = b;
                         }
+                        flag &= fc.exprs.get(i).is_none();
                     }
                     Value::Func(_) => {
                         let (fci, mut i) = rebuild_function(fc, env, false)?;
                         exprs.push(Expr::Factor(Factor::FuncCall(fci)));
                         idx += 1;
-                        while i < len {
-                            let (mut es, n, _) = rebuild_exprs(&fc.exprs[i..], args - idx, env)?;
+                        while i < len && args - idx != 0 {
+                            let (mut es, n, b) = rebuild_exprs(&fc.exprs[i..], args - idx, env)?;
                             idx += es.len();
                             exprs.append(&mut es);
                             i += n;
+                            flag = b;
                         }
+                        flag &= fc.exprs.get(i).is_none();
                     }
                 }
             }
@@ -78,10 +80,10 @@ fn rebuild_exprs(exprs: &[Expr], args: usize, env: &Env) -> Option<(Vec<Expr>, u
                 exprs.push(e.clone());
                 idx += 1;
             }
-            None => return Some((exprs, idx, false)),
+            None => return Some((exprs, idx, flag)),
         }
     }
-    Some((exprs, idx, iter.next().is_none()))
+    Some((exprs, idx, iter.next().is_none() && flag))
 }
 
 impl Factor {
