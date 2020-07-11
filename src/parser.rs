@@ -159,52 +159,40 @@ fn parse_val(tl: &[Token]) -> Option<(Factor, usize)> {
 }
 
 fn parse_assignment(tl: &[Token]) -> Option<(Factor, usize)> {
-    if let Some(Token::Id(id)) = tl.first() {
-        if let Some(Token::Key(op)) = tl.get(1) {
+    let tk_id = tl.first()?;
+    let tk_op = tl.get(1)?;
+    match (tk_id, tk_op) {
+        (Token::Id(id), Token::Key(op)) => {
             if op == "=" {
-                if let Some((expr, n)) = parse_expr(&tl[2..]) {
-                    Some((
-                        Factor::Assign(Assign {
-                            id: id.to_string(),
-                            expr: Box::new(expr),
-                        }),
-                        2 + n,
-                    ))
-                } else {
-                    None
-                }
+                let (expr, n) = parse_expr(&tl[2..])?;
+                Some((
+                    Factor::Assign(Assign {
+                        id: id.to_string(),
+                        expr: Box::new(expr),
+                    }),
+                    2 + n,
+                ))
             } else {
                 None
             }
-        } else {
-            None
         }
-    } else {
-        None
+        _ => None,
     }
 }
 
 fn parse_paren_expression(tl: &[Token]) -> Option<(Factor, usize)> {
-    if let Some(Token::Key(lp)) = tl.first() {
-        if lp == "(" {
-            if let Some((expr, n)) = parse_expr(&tl[1..]) {
-                if let Some(Token::Key(rp)) = tl.get(n + 1) {
-                    if rp == ")" {
-                        Some((Factor::Expr(Box::new(expr)), n + 2))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
+    let tk_lp = tl.first()?;
+    let (expr, n) = parse_expr(&tl[1..])?;
+    let tk_rp = tl.get(n + 1)?;
+    match (tk_lp, tk_rp) {
+        (Token::Key(lp), Token::Key(rp)) => {
+            if lp == "(" && rp == ")" {
+                Some((Factor::Expr(Box::new(expr)), n + 2))
             } else {
                 None
             }
-        } else {
-            None
         }
-    } else {
-        None
+        _ => None,
     }
 }
 
@@ -252,75 +240,59 @@ fn get_ids(expr: &Expr) -> Vec<String> {
 }
 
 pub fn parse_function(tl: &[Token]) -> Option<(Func, usize)> {
-    if let Some(Token::Key(key)) = tl.first() {
-        if key == "fn" {
-            if let Some(Token::Id(fname)) = tl.get(1) {
-                let ids: Vec<String> = tl[2..]
-                    .iter()
-                    .take_while(|x| match x {
-                        Token::Id(_) => true,
-                        _ => false,
-                    })
-                    .filter_map(|x| match x {
-                        Token::Id(vname) => Some(vname.to_string()),
-                        _ => None,
-                    })
-                    .collect();
-                let skip = 3 + ids.len();
-                // check the valid op
-                if tl.get(skip - 1) != Some(&Token::Key("=>".into())) {
-                    return None;
-                }
-                // check the dedup args
-                let mut args = ids.to_vec();
-                args.dedup();
-                if ids.len() != args.len() {
-                    return None;
-                }
-                // check the invalid args
-                if let Some((expr, n)) = parse_expr(&tl[skip..]) {
-                    {
-                        let _ids = get_ids(&expr);
-                        for id in _ids {
-                            if !ids.contains(&id) {
-                                return None;
-                            }
-                        }
+    let tk_key = tl.first()?;
+    let tk_id = tl.get(1)?;
+    let ids: Vec<String> = tl[2..]
+        .iter()
+        .take_while(|x| match x {
+            Token::Id(_) => true,
+            _ => false,
+        })
+        .filter_map(|x| match x {
+            Token::Id(vname) => Some(vname.to_string()),
+            _ => None,
+        })
+        .collect();
+    let skip = 3 + ids.len();
+    let tk_op = tl.get(skip - 1)?;
+    let mut args = ids.to_vec();
+    args.dedup();
+    if ids.len() != args.len() {
+        return None;
+    }
+    match (tk_key, tk_id, tk_op) {
+        (Token::Key(key), Token::Id(fname), Token::Key(op)) => {
+            if key == "fn" && op == "=>" {
+                let (expr, n) = parse_expr(&tl[skip..])?;
+                let _ids = get_ids(&expr);
+                for id in _ids {
+                    if !ids.contains(&id) {
+                        return None;
                     }
-                    Some((
-                        Func {
-                            fname: fname.to_string(),
-                            ids,
-                            expr: Box::new(expr),
-                        },
-                        skip + n,
-                    ))
-                } else {
-                    None
                 }
+                Some((
+                    Func {
+                        fname: fname.to_string(),
+                        ids,
+                        expr: Box::new(expr),
+                    },
+                    skip + n,
+                ))
             } else {
                 None
             }
-        } else {
-            None
         }
-    } else {
-        None
+        _ => None,
     }
 }
 
 fn parse_factor(tl: &[Token]) -> Option<(Factor, usize)> {
-    if let Some((a, n)) = parse_assignment(tl) {
-        Some((a, n))
-    } else if let Some((fe, n)) = parse_paren_expression(tl) {
-        Some((fe, n))
-    } else if let Some((fc, n)) = parse_function_call(tl) {
-        Some((fc, n))
-    } else if let Some(Token::Id(id)) = tl.first() {
-        Some((Factor::Id(id.to_string()), 1))
-    } else if let Some((f, n)) = parse_val(tl) {
-        Some((f, n))
-    } else {
-        None
-    }
+    parse_assignment(tl)
+        .or(parse_paren_expression(tl))
+        .or(parse_function_call(tl))
+        .or(match tl.first() {
+            Some(Token::Id(id)) => Some((Factor::Id(id.to_string()), 1)),
+            _ => None,
+        }
+        .or(parse_val(tl).or(None)))
 }
