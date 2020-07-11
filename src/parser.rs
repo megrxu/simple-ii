@@ -1,18 +1,18 @@
 use crate::tokenizer::Token;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Evaluable {
     Expr(Expr),
     Func(Vec<Token>),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Factor(Factor),
     ExprCombination((Box<Expr>, Op, Box<Expr>)),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Factor {
     Num(f32),
     Id(String),
@@ -20,8 +20,7 @@ pub enum Factor {
     Expr(Box<Expr>),
     FuncCall(FuncCall),
 }
-
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Op {
     Add,
     Sub,
@@ -30,19 +29,19 @@ pub enum Op {
     Mod,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Assign {
     pub id: String,
     pub expr: Box<Expr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FuncCall {
     pub id: String,
     pub exprs: Vec<Expr>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Func {
     pub fname: String,
     pub ids: Vec<String>,
@@ -50,7 +49,7 @@ pub struct Func {
 }
 
 pub fn parse(tl: &[Token]) -> Result<Evaluable, String> {
-    if let Some((expr, n)) = parse_expr(tl, false) {
+    if let Some((expr, n)) = parse_expr(tl) {
         if n == tl.len() {
             Ok(Evaluable::Expr(expr))
         } else {
@@ -105,9 +104,18 @@ fn parse_expr_combination(tl: &[Token]) -> Option<(Expr, usize)> {
 fn build_expr_combination(left: Expr, tl: &[Token], shift: usize) -> Option<(Expr, usize)> {
     if let Some((op, n)) = parse_op(tl) {
         match op {
-            // Op::Add | Op::Sub => None,
-            // Op::Div | Op::Mul => None,
-            _ => {
+            Op::Add | Op::Sub => {
+                if let Some((e, m)) = parse_expr(&tl[n..]) {
+                    build_expr_combination(
+                        Expr::ExprCombination((Box::new(left), op, Box::new(e))),
+                        &tl[(n + m)..],
+                        shift + n + m,
+                    )
+                } else {
+                    Some((left, shift + n))
+                }
+            }
+            Op::Div | Op::Mul | Op::Mod => {
                 if let Some((f, m)) = parse_atom(&tl[n..]) {
                     build_expr_combination(
                         Expr::ExprCombination((Box::new(left), op, Box::new(Expr::Factor(f)))),
@@ -132,10 +140,10 @@ fn build_expr_combination(left: Expr, tl: &[Token], shift: usize) -> Option<(Exp
     }
 }
 
-fn parse_expr(tl: &[Token], no_new_define: bool) -> Option<(Expr, usize)> {
+fn parse_expr(tl: &[Token]) -> Option<(Expr, usize)> {
     if let Some(res) = parse_expr_combination(tl) {
         Some(res)
-    } else if let Some((f, n)) = parse_factor(tl, no_new_define) {
+    } else if let Some((f, n)) = parse_factor(tl) {
         Some((Expr::Factor(f), n))
     } else {
         None
@@ -154,7 +162,7 @@ fn parse_assignment(tl: &[Token]) -> Option<(Factor, usize)> {
     if let Some(Token::Id(id)) = tl.first() {
         if let Some(Token::Key(op)) = tl.get(1) {
             if op == "=" {
-                if let Some((expr, n)) = parse_expr(&tl[2..], false) {
+                if let Some((expr, n)) = parse_expr(&tl[2..]) {
                     Some((
                         Factor::Assign(Assign {
                             id: id.to_string(),
@@ -179,7 +187,7 @@ fn parse_assignment(tl: &[Token]) -> Option<(Factor, usize)> {
 fn parse_paren_expression(tl: &[Token]) -> Option<(Factor, usize)> {
     if let Some(Token::Key(lp)) = tl.first() {
         if lp == "(" {
-            if let Some((expr, n)) = parse_expr(&tl[1..], false) {
+            if let Some((expr, n)) = parse_expr(&tl[1..]) {
                 if let Some(Token::Key(rp)) = tl.get(n + 1) {
                     if rp == ")" {
                         Some((Factor::Expr(Box::new(expr)), n + 2))
@@ -200,15 +208,12 @@ fn parse_paren_expression(tl: &[Token]) -> Option<(Factor, usize)> {
     }
 }
 
-fn parse_function_call(tl: &[Token], no_new_define: bool) -> Option<(Factor, usize)> {
-    if no_new_define {
-        return None;
-    };
+fn parse_function_call(tl: &[Token]) -> Option<(Factor, usize)> {
     if let Some(Token::Id(fname)) = tl.first() {
         let mut exprs: Vec<Expr> = vec![];
         let mut shift = 1;
-        while let Some((expr, n)) = parse_expr(&tl[shift..], true) {
-            exprs.push(expr);
+        while let Some((f, n)) = parse_factor(&tl[shift..]) {
+            exprs.push(Expr::Factor(f));
             shift += n;
         }
         if exprs.is_empty() {
@@ -273,7 +278,7 @@ pub fn parse_function(tl: &[Token]) -> Option<(Func, usize)> {
                     return None;
                 }
                 // check the invalid args
-                if let Some((expr, n)) = parse_expr(&tl[skip..], false) {
+                if let Some((expr, n)) = parse_expr(&tl[skip..]) {
                     {
                         let _ids = get_ids(&expr);
                         for id in _ids {
@@ -304,12 +309,12 @@ pub fn parse_function(tl: &[Token]) -> Option<(Func, usize)> {
     }
 }
 
-fn parse_factor(tl: &[Token], no_new_define: bool) -> Option<(Factor, usize)> {
+fn parse_factor(tl: &[Token]) -> Option<(Factor, usize)> {
     if let Some((a, n)) = parse_assignment(tl) {
         Some((a, n))
     } else if let Some((fe, n)) = parse_paren_expression(tl) {
         Some((fe, n))
-    } else if let Some((fc, n)) = parse_function_call(tl, no_new_define) {
+    } else if let Some((fc, n)) = parse_function_call(tl) {
         Some((fc, n))
     } else if let Some(Token::Id(id)) = tl.first() {
         Some((Factor::Id(id.to_string()), 1))

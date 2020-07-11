@@ -47,6 +47,9 @@ fn chained_functions() {
   let mut i = Interpreter::new();
   assert_eq!(i.input("fn f x y => x"), Ok(None));
   assert_eq!(i.input("fn g x y z => x"), Ok(None));
+  assert_eq!(i.input("x = 1"), Ok(Some(1.0)));
+  assert_eq!(i.input("y = 2"), Ok(Some(2.0)));
+  assert_eq!(i.input("f y x x"), Ok(Some(2.0)));
   assert_eq!(i.input("g g 1 2 3 f 4 5 f 6 7"), Ok(Some(1.0)));
   assert!(i.input("g g 1 2 3 f 4 5 f 6").is_err());
 }
