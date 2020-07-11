@@ -55,5 +55,5 @@ Simply `cargo run`.
 
 ## To do and To fix
 
-[ ] Use `Clone` instead of `.to_string()`.
-[ ] Some issues about applying functions to context-sensitive variables.
+- [ ] Use `Clone` instead of `.to_string()`.
+- [ ] Some issues about applying functions to context-sensitive variables.
