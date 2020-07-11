@@ -3,7 +3,7 @@ use crate::tokenizer::Token;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Evaluable {
     Expr(Expr),
-    Func(Vec<Token>),
+    Func(Func),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,21 +49,12 @@ pub struct Func {
 }
 
 pub fn parse(tl: &[Token]) -> Result<Evaluable, String> {
-    if let Some((expr, n)) = parse_expr(tl) {
-        if n == tl.len() {
-            Ok(Evaluable::Expr(expr))
-        } else {
-            Err("Expression parsed error.".into())
-        }
-    } else if let Some((_, n)) = parse_function(tl) {
-        if n == tl.len() {
-            Ok(Evaluable::Func(tl.to_vec()))
-        } else {
-            Err("Function parsed error.".into())
-        }
-    } else {
-        Err("Syntax error.".into())
-    }
+    parse_expr(tl)
+        .and_then(|(expr, _)| Some(Evaluable::Expr(expr)))
+        .ok_or(format!("Expression parsed error."))
+        .or(parse_function(tl)
+            .and_then(|(ast, _)| Some(Evaluable::Func(ast.clone())))
+            .ok_or(format!("Expression parsed error.")))
 }
 
 fn parse_op(tl: &[Token]) -> Option<(Op, usize)> {
@@ -87,7 +78,7 @@ fn parse_atom(tl: &[Token]) -> Option<(Factor, usize)> {
     } else {
         match tl.first() {
             Some(Token::Id(v)) => Some((Factor::Id(v.to_string()), 1)),
-            Some(Token::Val(v)) => Some((Factor::Num(*v), 1)),
+            Some(Token::Val(v)) => Some((Factor::Num(v.clone()), 1)),
             _ => None,
         }
     }
@@ -152,7 +143,7 @@ fn parse_expr(tl: &[Token]) -> Option<(Expr, usize)> {
 
 fn parse_val(tl: &[Token]) -> Option<(Factor, usize)> {
     if let Some(Token::Val(v)) = tl.first() {
-        Some((Factor::Num(*v), 1))
+        Some((Factor::Num(v.clone()), 1))
     } else {
         None
     }

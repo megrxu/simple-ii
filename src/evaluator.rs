@@ -1,23 +1,21 @@
 use crate::parser::*;
-use crate::tokenizer::Token;
 use std::collections::HashMap;
 
 pub type Env = HashMap<String, Value>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Num(f32),
     // dirty, since we can not easily deep copy the
     // recursive AST for further using, we may store
     // the tokens instead
-    Func(Vec<Token>),
+    Func(Func),
 }
 
 // rebuild the function call according to the runtime information
 fn rebuild_function(fc: &FuncCall, env: &Env, root: bool) -> Option<(FuncCall, usize)> {
     match env.get(&fc.id) {
-        Some(Value::Func(fts)) => {
-            let (ast, _) = parse_function(fts)?;
+        Some(Value::Func(ast)) => {
             let args = ast.ids.len();
             let (exprs, n, flag) = rebuild_exprs(&fc.exprs, args, env)?;
             if !flag && root {
@@ -50,7 +48,7 @@ fn rebuild_exprs(exprs: &[Expr], args: usize, env: &Env) -> Option<(Vec<Expr>, u
                 match res {
                     Value::Num(v) => {
                         let mut i = 0;
-                        exprs.push(Expr::Factor(Factor::Num(*v)));
+                        exprs.push(Expr::Factor(Factor::Num(v.clone())));
                         idx += 1;
                         while i < len && args - idx != 0 {
                             let (mut es, n, b) = rebuild_exprs(&fc.exprs[i..], args - idx, env)?;
@@ -90,52 +88,44 @@ impl Factor {
     fn eval(&self, env: &mut Env) -> Result<Option<f32>, String> {
         match self {
             Factor::Num(v) => Ok(Some(v.clone())),
-            Factor::Assign(assign) => match assign.expr.eval(env) {
-                Ok(Some(v)) => {
-                    if let Some(Value::Func(_)) = env.get(&assign.id) {
-                        return Err("Has been defined as function.".into());
+            Factor::Assign(assign) => {
+                let v = assign.expr.eval(env)?;
+                let var = env.get(&assign.id);
+                match (var, v) {
+                    (Some(Value::Func(_)), _) => Err(format!("Has been defined as function.")),
+                    (_, Some(val)) => {
+                        env.insert(assign.id.to_string(), Value::Num(val));
+                        Ok(v)
                     }
-                    env.insert(assign.id.to_string(), Value::Num(v));
-                    Ok(Some(v))
+                    (_, _) => Ok(v),
                 }
-                res => res,
-            },
+            }
             Factor::Id(id) => match env.get(&id.to_string()) {
                 Some(Value::Num(v)) => Ok(Some(v.clone())),
-                Some(Value::Func(f)) => {
-                    let (ast, _) = parse_function(&f).unwrap();
-                    ast.expr.eval(env)
-                }
+                Some(Value::Func(ast)) => ast.expr.clone().eval(env),
                 None => Err(format!("`{}` is not defined yet.", id)),
             },
             Factor::FuncCall(fc) => {
                 // rebuild the fuction call according to the contexts
-                if let Some((fc, _)) = rebuild_function(fc, env, true) {
-                    match env.get(&fc.id) {
-                        Some(Value::Func(fts)) => {
-                            let (ast, _) = parse_function(&fts).unwrap();
-                            let mut tmp: HashMap<String, Value> = HashMap::default();
-                            let mut iter = fc.exprs.iter();
-                            for id in &ast.ids {
-                                if let Some(expr) = iter.next() {
-                                    if let Some(v) = expr.eval(env)? {
-                                        tmp.insert(id.to_string(), Value::Num(v));
-                                    } else {
-                                        return Err("".into());
-                                    }
-                                } else {
-                                    return Err(format!(
-                                        "Function `{}` does not have enough arguments.",
-                                        fc.id
-                                    ));
-                                }
-                            }
-                            ast.expr.eval(&mut tmp)
+                let (fc, _) = rebuild_function(fc, env, true).ok_or("Not defined yet.")?;
+                match env.clone().get(&fc.id) {
+                    Some(Value::Func(ast)) => {
+                        let mut tmp: HashMap<String, Value> = HashMap::default();
+                        let mut iter = fc.exprs.iter();
+                        for id in &ast.ids {
+                            let expr = iter.next().ok_or(format!(
+                                "Function `{}` does not have enough arguments.",
+                                fc.id
+                            ))?;
+                            let v = expr.clone().eval(env)?;
+                            tmp.insert(
+                                id.to_string(),
+                                Value::Num(v.ok_or("Eval error.".to_string())?),
+                            );
                         }
-                        _ => Err(format!("{} is not defined yet or not a function.", &fc.id)),
+                        ast.expr.eval(&mut tmp)
                     }
-                } else {
-                    return Err("Not defined yet.".into());
+                    _ => Err(format!("{} is not defined yet or not a function.", &fc.id)),
                 }
             }
             Factor::Expr(expr) => expr.eval(env),
@@ -165,12 +155,11 @@ impl Evaluable {
     pub fn eval(&self, env: &mut Env) -> Result<Option<f32>, String> {
         match self {
             Evaluable::Expr(exp) => exp.eval(env),
-            Evaluable::Func(func) => {
-                let (ast, _) = parse_function(func).unwrap();
+            Evaluable::Func(ast) => {
                 if let Some(Value::Num(_)) = env.get(&ast.fname) {
                     return Err("Has been defined as variable.".into());
                 }
-                env.insert(ast.fname, Value::Func(func.to_vec()));
+                env.insert(ast.fname.clone(), Value::Func(ast.clone()));
                 Ok(None)
             }
         }
